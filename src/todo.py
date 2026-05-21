@@ -8,9 +8,9 @@ from typing import Optional
 class TodoItem:
     """Todoアイテムを表すデータクラス"""
 
-    id: int
-    title: str
-    done: bool = False
+    id: int # アイテムの一意なID
+    title: str # アイテムのタイトル
+    done: bool = False # アイテムの完了状態（デフォルトはFalse）
 
 
 class TodoList:
