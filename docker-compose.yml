@@ -6,11 +6,11 @@ services:
     volumes:
       - .:/workspace
     env_file:
-      - ./app/.env
+      - ./src/.env
     environment:
       - PYTHONDONTWRITEBYTECODE=1 # Pythonが.pycファイルを生成しないようにする。Dockerコンテナの中ではこのキャッシュは不要なので、作らないように設定
       - PYTHONUNBUFFERED=1 # Pythonの出力をバッファリングしないようにする。docker compose logs -f でログをリアルタイム確認するときに、すぐ表示されるように設定
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
   db:
     image: postgres:13
     environment:
