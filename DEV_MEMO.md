@@ -95,5 +95,5 @@ app/
 
 ## GitHub
 
-- リポジトリ: https://github.com/YasushiMatsushima/docker-python-backend
+- リポジトリ: https://github.com/YasushiMatsushima/AI-MULTI-AGENT
 - mainブランチで管理
