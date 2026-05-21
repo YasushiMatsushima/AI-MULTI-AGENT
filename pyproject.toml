@@ -5,7 +5,11 @@ description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.136.1",
+    "pytest>=9.0.3",
     "python-dotenv>=1.2.2",
     "scalar-fastapi>=1.8.2",
     "uvicorn[standard]>=0.47.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
