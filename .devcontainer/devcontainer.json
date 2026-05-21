@@ -1,5 +1,5 @@
 {
-  "name": "docker-python-backend",
+  "name": "ai-multi-agents-project",
   "dockerComposeFile": "../docker-compose.yml",
   "service": "api",
   "workspaceFolder": "/workspace",
