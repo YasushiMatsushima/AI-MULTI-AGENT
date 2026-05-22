@@ -3,14 +3,18 @@
 ## 構成
 
 ```
-docker-python-backend/
-├── app/
+/
+├── src/
 │   ├── __init__.py   # パッケージ化のためのファイル（中身は空でOK）
-│   └── main.py       # FastAPI アプリ本体
+│   ├── main.py       # FastAPI アプリ本体
+│   └── todo.py       # TodoItem / TodoList クラス
+├── tests/
+│   └── test_todo.py  # テストコード
+├── docs/             # ドキュメント
 ├── Dockerfile
-├── compose.yaml
-├── requirements.txt
-├── .dockerignore
+├── docker-compose.yml
+├── pyproject.toml    # 依存パッケージ定義（uv 管理）
+├── uv.lock
 └── .gitignore
 ```
 
@@ -26,55 +30,33 @@ docker compose down
 # ログ確認
 docker compose logs -f
 
-# イメージ再ビルド（requirements.txt を変更したとき）
+# イメージ再ビルド（依存パッケージを変更したとき）
 docker compose up --build -d
 ```
 
 - アクセス先: http://localhost:8080
 - Swagger UI: http://localhost:8080/docs
-- `app/` をボリュームマウントしているので、コード編集は即反映（--reload）
+- `src/` をボリュームマウントしているので、コード編集は即反映（--reload）
 
-## venv（ローカルの補完・型チェック用）
+## uv（ローカル開発・補完・テスト用）
+
+パッケージ管理には `pip` ではなく `uv` を使う。
 
 ```bash
-# 作成
-python -m venv .venv
+# 依存パッケージのインストール（初回 or uv.lock 変更後）
+uv sync
 
-# 有効化（Linux/Mac）
-source venv/bin/activate
+# パッケージを追加する
+uv add fastapi
 
-# 有効化（Windows）
-venv\Scripts\activate
+# スクリプト実行
+uv run python src/main.py
 
-# パッケージインストール
-# # 1つだけインストール
-# pip install fastapi
-# ファイルに書かれた全パッケージを一括インストール
-# pip install -r requirements.txt
-pip install -r requirements.txt
-
-pip install fastapi[all]
-# freeze は「その時点でインストールされているパッケージとバージョンを一覧で出力する」コマンド
-pip freeze > requirements.txt
-#イメージ
-# requirements.txt の中身：
-#  fastapi==0.136.1
-#  uvicorn==0.47.0
-#  pydantic==2.13.4
-#  ...
-
-# pip install -r で1行ずつ読んで順番にインストール
-
-# pip install fastapi==0.136.1
-# pip install uvicorn==0.47.0
-# pip install pydantic==2.13.4
-# -r は --requirement の省略形
-
-# 無効化
-deactivate
+# テスト実行
+uv run pytest
 ```
 
-> 実際の起動は Docker で行う。venv はVSCodeの補完を効かせるために使う。
+> `pip install` は使用しない。依存関係は `pyproject.toml` と `uv.lock` で管理する。
 
 ## `__init__.py` について
 
@@ -82,7 +64,7 @@ deactivate
 中身は空でOK。ルーターやモデルをディレクトリに分けるときに必要になる。
 
 ```
-app/
+src/
 ├── __init__.py
 ├── main.py
 ├── routers/
