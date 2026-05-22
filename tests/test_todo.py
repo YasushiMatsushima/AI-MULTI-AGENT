@@ -74,3 +74,32 @@ def test_list_all_is_copy(todo_list: TodoList) -> None:
     items = todo_list.list_all()
     items.clear()
     assert len(todo_list.list_all()) == 1
+
+
+def test_add_item_with_category(todo_list: TodoList) -> None:
+    """カテゴリ付きでアイテムを追加できること"""
+    item = todo_list.add("企画書を作成する", category="仕事")
+    assert item.category == "仕事"
+
+
+def test_add_item_default_category(todo_list: TodoList) -> None:
+    """カテゴリ省略時は空文字になること"""
+    item = todo_list.add("買い物をする")
+    assert item.category == ""
+
+
+def test_list_by_category(todo_list: TodoList) -> None:
+    """指定カテゴリのアイテムのみ返ること"""
+    todo_list.add("企画書を作成する", category="仕事")
+    todo_list.add("映画を観る", category="プライベート")
+    todo_list.add("報告書を提出する", category="仕事")
+    items = todo_list.list_by_category("仕事")
+    assert len(items) == 2
+    assert all(item.category == "仕事" for item in items)
+
+
+def test_list_by_category_no_match(todo_list: TodoList) -> None:
+    """存在しないカテゴリは空リストを返すこと"""
+    todo_list.add("タスク", category="仕事")
+    result = todo_list.list_by_category("趣味")
+    assert result == []

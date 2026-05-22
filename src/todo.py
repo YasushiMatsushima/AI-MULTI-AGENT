@@ -14,6 +14,7 @@ class TodoItem:
     completed: bool = False # アイテムの完了状態（デフォルトはFalse）
     craeted_at: str = "" # アイテムの作成日時（オプション）
     updated_at: str = "" # アイテムの更新日時（オプション）
+    category: str = "" # カテゴリ（例: 仕事、プライベート）
 
 
 class TodoList:
@@ -23,10 +24,10 @@ class TodoList:
         self._items: list[TodoItem] = []
         self._next_id: int = 1
 
-    def add(self, title: str) -> TodoItem:
+    def add(self, title: str, category: str = "") -> TodoItem:
         """新しいTodoアイテムを追加する"""
         now = datetime.now().isoformat()
-        item = TodoItem(id=self._next_id, title=title, craeted_at=now, updated_at=now)
+        item = TodoItem(id=self._next_id, title=title, craeted_at=now, updated_at=now, category=category)
         self._items.append(item)
         self._next_id += 1
         return item
@@ -50,6 +51,21 @@ class TodoList:
             return False
         self._items.remove(item)
         return True
+
+    def list_by_category(self, category: str) -> list[TodoItem]:
+        """指定カテゴリのアイテムを返す"""
+        return [item for item in self._items if item.category == category]
+
+    def __str__(self) -> str:
+        """TodoListの中身を文字列で返す"""
+        if not self._items:
+            return "TodoList: (空)"
+        lines = [f"TodoList ({len(self._items)}件):"]
+        for item in self._items:
+            mark = "✓ " if item.completed else "[ ]"
+            category = f"[{item.category}] " if item.category else ""
+            lines.append(f"  {mark} {item.id}. {category}{item.title}")
+        return "\n".join(lines)
 
     def _find(self, item_id: int) -> Optional[TodoItem]:
         """IDでアイテムを検索する"""
