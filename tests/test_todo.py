@@ -103,3 +103,32 @@ def test_list_by_category_no_match(todo_list: TodoList) -> None:
     todo_list.add("タスク", category="仕事")
     result = todo_list.list_by_category("趣味")
     assert result == []
+
+
+def test_add_item_with_priority(todo_list: TodoList) -> None:
+    """優先度付きでアイテムを追加できること"""
+    item = todo_list.add("緊急対応", priority="高")
+    assert item.priority == "高"
+
+
+def test_add_item_default_priority(todo_list: TodoList) -> None:
+    """優先度省略時は「中」になること"""
+    item = todo_list.add("通常タスク")
+    assert item.priority == "中"
+
+
+def test_list_by_priority(todo_list: TodoList) -> None:
+    """指定優先度のアイテムのみ返ること"""
+    todo_list.add("緊急対応", priority="高")
+    todo_list.add("通常タスク", priority="中")
+    todo_list.add("重要会議の準備", priority="高")
+    items = todo_list.list_by_priority("高")
+    assert len(items) == 2
+    assert all(item.priority == "高" for item in items)
+
+
+def test_list_by_priority_no_match(todo_list: TodoList) -> None:
+    """存在しない優先度は空リストを返すこと"""
+    todo_list.add("タスク", priority="高")
+    result = todo_list.list_by_priority("低")
+    assert result == []

@@ -15,6 +15,7 @@ class TodoItem:
     craeted_at: str = "" # アイテムの作成日時（オプション）
     updated_at: str = "" # アイテムの更新日時（オプション）
     category: str = "" # カテゴリ（例: 仕事、プライベート）
+    priority: str = "中" # 優先度（高・中・低）
 
 
 class TodoList:
@@ -24,10 +25,10 @@ class TodoList:
         self._items: list[TodoItem] = []
         self._next_id: int = 1
 
-    def add(self, title: str, category: str = "") -> TodoItem:
+    def add(self, title: str, category: str = "", priority: str = "中") -> TodoItem:
         """新しいTodoアイテムを追加する"""
         now = datetime.now().isoformat()
-        item = TodoItem(id=self._next_id, title=title, craeted_at=now, updated_at=now, category=category)
+        item = TodoItem(id=self._next_id, title=title, craeted_at=now, updated_at=now, category=category, priority=priority)
         self._items.append(item)
         self._next_id += 1
         return item
@@ -56,6 +57,10 @@ class TodoList:
         """指定カテゴリのアイテムを返す"""
         return [item for item in self._items if item.category == category]
 
+    def list_by_priority(self, priority: str) -> list[TodoItem]:
+        """指定優先度のアイテムを返す"""
+        return [item for item in self._items if item.priority == priority]
+
     def __str__(self) -> str:
         """TodoListの中身を文字列で返す"""
         if not self._items:
@@ -63,8 +68,9 @@ class TodoList:
         lines = [f"TodoList ({len(self._items)}件):"]
         for item in self._items:
             mark = "✓ " if item.completed else "[ ]"
-            category = f"[{item.category}] " if item.category else ""
-            lines.append(f"  {mark} {item.id}. {category}{item.title}")
+            category = f"[{item.category}]" if item.category else ""
+            priority = f"[{item.priority}]"
+            lines.append(f"  {mark} {item.id}. {category}{priority} {item.title}")
         return "\n".join(lines)
 
     def _find(self, item_id: int) -> Optional[TodoItem]:
