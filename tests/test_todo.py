@@ -14,7 +14,7 @@ def test_add_item(todo_list: TodoList) -> None:
     item = todo_list.add("買い物をする")
     assert item.id == 1
     assert item.title == "買い物をする"
-    assert item.done is False
+    assert item.completed is False
 
 
 def test_add_multiple_items_increments_id(todo_list: TodoList) -> None:
@@ -43,14 +43,14 @@ def test_list_all_returns_all_items(todo_list: TodoList) -> None:
 def test_mark_done(todo_list: TodoList) -> None:
     """アイテムを完了状態にできること"""
     todo_list.add("完了テスト")
-    result = todo_list.mark_done(1)
+    result = todo_list.mark_completed(1)
     assert result is not None
-    assert result.done is True
+    assert result.completed is True
 
 
 def test_mark_done_not_found(todo_list: TodoList) -> None:
     """存在しないIDを完了にしようとするとNoneを返すこと"""
-    result = todo_list.mark_done(999)
+    result = todo_list.mark_completed(999)
     assert result is None
 
 
