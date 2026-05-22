@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -12,7 +11,7 @@ class TodoItem:
     id: int # アイテムの一意なID
     title: str # アイテムのタイトル
     completed: bool = False # アイテムの完了状態（デフォルトはFalse）
-    craeted_at: str = "" # アイテムの作成日時（オプション）
+    created_at: str = "" # アイテムの作成日時（オプション）
     updated_at: str = "" # アイテムの更新日時（オプション）
     category: str = "" # カテゴリ（例: 仕事、プライベート）
     priority: str = "中" # 優先度（高・中・低）
@@ -25,10 +24,14 @@ class TodoList:
         self._items: list[TodoItem] = []
         self._next_id: int = 1
 
+    _VALID_PRIORITIES = {"高", "中", "低"}
+
     def add(self, title: str, category: str = "", priority: str = "中") -> TodoItem:
         """新しいTodoアイテムを追加する"""
+        if priority not in self._VALID_PRIORITIES:
+            raise ValueError(f"優先度は '高', '中', '低' のいずれかを指定してください: {priority!r}")
         now = datetime.now().isoformat()
-        item = TodoItem(id=self._next_id, title=title, craeted_at=now, updated_at=now, category=category, priority=priority)
+        item = TodoItem(id=self._next_id, title=title, created_at=now, updated_at=now, category=category, priority=priority)
         self._items.append(item)
         self._next_id += 1
         return item
@@ -37,7 +40,7 @@ class TodoList:
         """全Todoアイテムの一覧を返す"""
         return list(self._items)
 
-    def mark_completed(self, item_id: int) -> Optional[TodoItem]:
+    def mark_completed(self, item_id: int) -> TodoItem | None:
         """指定IDのアイテムを完了状態にする。見つからない場合はNoneを返す"""
         item = self._find(item_id)
         if item is not None:
@@ -67,12 +70,12 @@ class TodoList:
             return "TodoList: (空)"
         lines = [f"TodoList ({len(self._items)}件):"]
         for item in self._items:
-            mark = "✓ " if item.completed else "[ ]"
+            mark = "[✓]" if item.completed else "[ ]"
             category = f"[{item.category}]" if item.category else ""
             priority = f"[{item.priority}]"
             lines.append(f"  {mark} {item.id}. {category}{priority} {item.title}")
         return "\n".join(lines)
 
-    def _find(self, item_id: int) -> Optional[TodoItem]:
+    def _find(self, item_id: int) -> TodoItem | None:
         """IDでアイテムを検索する"""
         return next((i for i in self._items if i.id == item_id), None)
