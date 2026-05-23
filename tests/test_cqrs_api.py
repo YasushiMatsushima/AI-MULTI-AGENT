@@ -9,6 +9,9 @@ import tempfile
 import pytest
 from fastapi.testclient import TestClient
 
+# Event Store に存在しない UUID。404 / 409 を引き起こすために使う。
+NONEXISTENT_TODO_ID = "00000000-0000-0000-0000-000000000000"
+
 
 @pytest.fixture
 def client():
@@ -76,7 +79,7 @@ def test_get_todo_by_id(client) -> None:
 
 def test_get_unknown_todo_returns_404(client) -> None:
     """存在しない ID は 404。"""
-    resp = client.get("/todos/non-existent-id")
+    resp = client.get(f"/todos/{NONEXISTENT_TODO_ID}")
     assert resp.status_code == 404
 
 
@@ -92,7 +95,7 @@ def test_complete_todo_changes_state(client) -> None:
 
 def test_complete_unknown_id_returns_409(client) -> None:
     """存在しない ID への complete は 409 Conflict。"""
-    resp = client.post("/todos/non-existent-id/complete")
+    resp = client.post(f"/todos/{NONEXISTENT_TODO_ID}/complete")
     assert resp.status_code == 409
 
 
@@ -150,7 +153,7 @@ def test_get_todo_events_returns_full_history(client) -> None:
 
 def test_get_events_unknown_id_returns_404(client) -> None:
     """存在しない ID の events は 404。"""
-    resp = client.get("/todos/non-existent/events")
+    resp = client.get(f"/todos/{NONEXISTENT_TODO_ID}/events")
     assert resp.status_code == 404
 
 

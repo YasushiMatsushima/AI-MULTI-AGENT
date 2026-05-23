@@ -52,7 +52,7 @@ class CommandHandler:
 
         event = TodoAdded(
             aggregate_id=cmd.aggregate_id,
-            version=1,
+            version=agg.version + 1,
             title=title,
             category=cmd.category.strip(),
             priority=cmd.priority,

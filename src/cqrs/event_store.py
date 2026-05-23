@@ -17,6 +17,10 @@ class ConcurrencyError(Exception):
     """楽観ロック失敗（同じ aggregate_id × version が既に存在する）。"""
 
 
+class UnknownEventTypeError(Exception):
+    """イベントストアから未知の event_type を読み込んだときに送出する。"""
+
+
 _PAYLOAD_RESERVED = frozenset({"aggregate_id", "version", "occurred_at", "event_id"})
 
 
@@ -170,7 +174,14 @@ class EventStore:
         occurred_at: str,
         event_id: str,
     ) -> Event:
-        cls = EVENT_TYPES[event_type]
+        """DB レコードをイベントオブジェクトに変換する。
+
+        Raises:
+            UnknownEventTypeError: event_type が EVENT_TYPES に登録されていない場合。
+        """
+        cls = EVENT_TYPES.get(event_type)
+        if cls is None:
+            raise UnknownEventTypeError(f"未知のイベントタイプ: {event_type!r}")
         return cls(
             aggregate_id=aggregate_id,
             version=version,

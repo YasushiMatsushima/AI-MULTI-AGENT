@@ -7,10 +7,19 @@ Todo API を提供する。Event Store はプロセス内で 1 インスタン�
 
 import os
 import uuid
+from enum import Enum
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from scalar_fastapi import get_scalar_api_reference
+
+
+class PriorityEnum(str, Enum):
+    """優先度クエリパラメータの許容値。"""
+
+    HIGH = "高"
+    MIDDLE = "中"
+    LOW = "低"
 
 from src.cqrs.aggregates import AggregateError
 from src.cqrs.command_handler import CommandHandler
@@ -90,52 +99,58 @@ def create_todo(req: AddTodoRequest):
 
 
 @app.post("/todos/{todo_id}/complete")
-def complete_todo(todo_id: str):
-    """Todo を完了状態にする（Command 側）。"""
+def complete_todo(todo_id: uuid.UUID):
+    """Todo を完了状態にする（Command 側）。todo_id が UUID 形式でない場合は 422。"""
+    todo_id_str = str(todo_id)
     try:
         event = _command_handler.handle_complete(
-            CompleteTodoCommand(aggregate_id=todo_id)
+            CompleteTodoCommand(aggregate_id=todo_id_str)
         )
     except AggregateError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    return {"id": todo_id, "event_id": event.event_id, "version": event.version}
+    return {"id": todo_id_str, "event_id": event.event_id, "version": event.version}
 
 
 @app.delete("/todos/{todo_id}")
-def delete_todo(todo_id: str):
-    """Todo を削除する（Command 側、論理削除イベントを発行）。"""
+def delete_todo(todo_id: uuid.UUID):
+    """Todo を削除する（Command 側、論理削除イベントを発行）。todo_id が UUID 形式でない場合は 422。"""
+    todo_id_str = str(todo_id)
     try:
-        event = _command_handler.handle_delete(DeleteTodoCommand(aggregate_id=todo_id))
+        event = _command_handler.handle_delete(
+            DeleteTodoCommand(aggregate_id=todo_id_str)
+        )
     except AggregateError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    return {"id": todo_id, "event_id": event.event_id, "version": event.version}
+    return {"id": todo_id_str, "event_id": event.event_id, "version": event.version}
 
 
 @app.get("/todos")
-def list_todos(category: str | None = None, priority: str | None = None):
-    """Todo 一覧を取得する（Query 側）。category / priority でフィルタ可能。"""
+def list_todos(
+    category: str | None = None, priority: PriorityEnum | None = None
+):
+    """Todo 一覧を取得する（Query 側）。category / priority でフィルタ可能。priority は '高/中/低' 以外だと 422。"""
     if category is not None:
         items = _read_model.list_by_category(category)
     elif priority is not None:
-        items = _read_model.list_by_priority(priority)
+        items = _read_model.list_by_priority(priority.value)
     else:
         items = _read_model.list_all()
     return [item.__dict__ for item in items]
 
 
 @app.get("/todos/{todo_id}")
-def get_todo(todo_id: str):
-    """指定 ID の Todo を取得する（Query 側）。"""
-    item = _read_model.get(todo_id)
+def get_todo(todo_id: uuid.UUID):
+    """指定 ID の Todo を取得する（Query 側）。todo_id が UUID 形式でない場合は 422。"""
+    item = _read_model.get(str(todo_id))
     if item is None:
         raise HTTPException(status_code=404, detail="Not Found")
     return item.__dict__
 
 
 @app.get("/todos/{todo_id}/events")
-def get_todo_events(todo_id: str):
-    """指定 Todo のイベント履歴を返す（Event Sourcing の監査ログ機能）。"""
-    events = _read_model.get_events(todo_id)
+def get_todo_events(todo_id: uuid.UUID):
+    """指定 Todo のイベント履歴を返す（Event Sourcing の監査ログ機能）。todo_id が UUID 形式でない場合は 422。"""
+    events = _read_model.get_events(str(todo_id))
     if not events:
         raise HTTPException(status_code=404, detail="Not Found")
     return [
