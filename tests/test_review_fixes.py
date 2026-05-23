@@ -3,12 +3,19 @@
 各テストは「修正後のあるべき動作（仕様）」を表現している。
 現状のコードに対しては Red になるものが含まれており、それはバグを示す正しいシグナルである。
 
-指摘事項:
+指摘事項（初回レビュー）:
 1. [Critical]  event_store._deserialize で未知 event_type が KeyError → UnknownEventTypeError を送出すべき
 2. [Major]     command_handler.handle_add の version=1 ハードコード → agg.version + 1 に統一すべき
 3. [Major]     main.py の todo_id パスパラメータが UUID バリデーションされない → 不正 UUID で HTTP 422
 4. [Major]     main.py の list_by_priority が不正値で空リスト → HTTP 422 を返すべき
 5. [Major]     projections._build_state が list_by_category / list_by_priority で 2 回呼ばれる → 1 回のみ
+
+追加修正（第二回レビュー）:
+6. aggregates.apply() に未知イベント分岐を追加 → AggregateError を送出
+7. command_handler._maybe_snapshot() シグネチャ変更 → Event Store の二重ロードを排除
+8. event_store._deserialize() でペイロードインジェクション対策 → 未知キーと共通フィールドを除外
+9. event_store.__init__() でファイル DB の場合のみ WAL モードを有効化
+10. main.py で lifespan 導入 → シャットダウン時に _event_store.close() を呼ぶ
 """
 
 import importlib
@@ -16,7 +23,7 @@ import os
 import sqlite3
 import tempfile
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -425,3 +432,355 @@ class TestBuildStateCalledOnce:
         assert len(items) == 1
         assert items[0].title == "低優先タスク"
         assert mock_store.load_all_events.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# 修正 6: aggregates.apply() に未知イベント分岐 → AggregateError を送出
+# ---------------------------------------------------------------------------
+
+
+class TestApplyUnknownEvent:
+    """apply() に未知のイベントタイプを渡すと AggregateError が送出される。"""
+
+    def test_apply_unknown_event_raises_aggregate_error(self) -> None:
+        """apply() に未知イベントを渡すと AggregateError が送出される。
+
+        あるべき動作: 既知の TodoAdded / TodoCompleted / TodoDeleted 以外のイベントが
+        apply() に渡されたとき、AggregateError を送出し、リプレイの壊れを即座に検出できる。
+        """
+        from src.cqrs.aggregates import AggregateError, TodoAggregate
+        from src.cqrs.events import Event
+
+        # 未知のイベントクラスをインラインで定義する
+        @dataclass_like_event
+        class UnknownEvent(Event):
+            event_type = "UnknownEvent"  # type: ignore[assignment]
+
+        agg = TodoAggregate(aggregate_id=str(uuid.uuid4()))
+        unknown = UnknownEvent(aggregate_id=agg.aggregate_id, version=1)
+
+        with pytest.raises(AggregateError, match="UnknownEvent"):
+            agg.apply(unknown)
+
+    def test_apply_unknown_event_error_message_contains_type_name(self) -> None:
+        """AggregateError のメッセージには未知のイベントタイプ名が含まれる。
+
+        あるべき動作: エラーメッセージから「どのイベントタイプが未知だったか」を
+        開発者がすぐ特定できること。
+        """
+        from src.cqrs.aggregates import AggregateError, TodoAggregate
+        from src.cqrs.events import Event
+
+        @dataclass_like_event
+        class AnotherUnknown(Event):
+            event_type = "AnotherUnknown"  # type: ignore[assignment]
+
+        agg = TodoAggregate(aggregate_id=str(uuid.uuid4()))
+        unknown = AnotherUnknown(aggregate_id=agg.aggregate_id, version=1)
+
+        with pytest.raises(AggregateError) as exc_info:
+            agg.apply(unknown)
+        assert "AnotherUnknown" in str(exc_info.value)
+
+    def test_apply_known_events_do_not_raise(self) -> None:
+        """既知のイベント (TodoAdded, TodoCompleted, TodoDeleted) は正常に適用される。
+
+        あるべき動作: 未知イベント検出のガード追加後も、既知イベントには影響しない。
+        """
+        from src.cqrs.aggregates import TodoAggregate
+        from src.cqrs.events import TodoAdded, TodoCompleted, TodoDeleted
+
+        aid = str(uuid.uuid4())
+        agg = TodoAggregate(aggregate_id=aid)
+        agg.apply(TodoAdded(aggregate_id=aid, version=1, title="テスト", category="", priority="中"))
+        agg.apply(TodoCompleted(aggregate_id=aid, version=2))
+        agg.apply(TodoDeleted(aggregate_id=aid, version=3))
+
+        assert agg.version == 3
+        assert agg.completed is True
+        assert agg.deleted is True
+
+
+def dataclass_like_event(cls):
+    """Event サブクラスに frozen dataclass デコレータを適用するヘルパー。"""
+    import dataclasses
+    return dataclasses.dataclass(frozen=True, kw_only=True)(cls)
+
+
+# ---------------------------------------------------------------------------
+# 修正 7: _maybe_snapshot の二重ロード排除
+# ---------------------------------------------------------------------------
+
+
+class TestMaybeSnapshotNoDoubleLoad:
+    """_maybe_snapshot がスナップショット保存時に Event Store を再ロードしない。"""
+
+    def test_maybe_snapshot_no_double_load_at_interval(self) -> None:
+        """snapshot_interval=1 で 1 件追加したとき load_events は 1 回だけ呼ばれる。
+
+        あるべき動作: _maybe_snapshot は既に手元にある agg と event から最新状態を
+        組み立てるため、Event Store への追加ロードは発生しない。
+        修正前は _maybe_snapshot 内で load_events / load_snapshot を再呼び出しして
+        二重ロードが発生していた。
+        """
+        from src.cqrs.command_handler import CommandHandler
+        from src.cqrs.commands import AddTodoCommand
+
+        store = MagicMock(spec=EventStore)
+        # load_snapshot は None（スナップショットなし）を返す
+        store.load_snapshot.return_value = None
+        # load_events は空リストを返す（新規 Aggregate）
+        store.load_events.return_value = []
+        # append は副作用なし
+        store.append.return_value = None
+        # save_snapshot は副作用なし
+        store.save_snapshot.return_value = None
+
+        # snapshot_interval=1 にすることで最初のイベントでスナップショットが走る
+        handler = CommandHandler(store, snapshot_interval=1)
+        aid = str(uuid.uuid4())
+
+        handler.handle_add(AddTodoCommand(aggregate_id=aid, title="テスト"))
+
+        # load_events は _load() の中で 1 回だけ呼ばれるべき
+        # _maybe_snapshot 内で追加ロードが走ると 2 回以上になる
+        assert store.load_events.call_count == 1, (
+            f"load_events が {store.load_events.call_count} 回呼ばれました。"
+            "_maybe_snapshot 内での二重ロードが修正されていない可能性があります。"
+        )
+        # load_snapshot も 1 回だけ（_load() の中のみ）
+        assert store.load_snapshot.call_count == 1, (
+            f"load_snapshot が {store.load_snapshot.call_count} 回呼ばれました。"
+            "_maybe_snapshot 内での二重ロードが修正されていない可能性があります。"
+        )
+        # スナップショットは保存されるべき（interval=1 なので version=1 でトリガー）
+        assert store.save_snapshot.call_count == 1
+
+    def test_maybe_snapshot_not_triggered_below_interval(self) -> None:
+        """snapshot_interval=10 で 1 件追加してもスナップショットは保存されない。
+
+        あるべき動作: version が snapshot_interval の倍数でなければ
+        save_snapshot は呼ばれない（追加ロードも発生しない）。
+        """
+        from src.cqrs.command_handler import CommandHandler
+        from src.cqrs.commands import AddTodoCommand
+
+        store = MagicMock(spec=EventStore)
+        store.load_snapshot.return_value = None
+        store.load_events.return_value = []
+        store.append.return_value = None
+
+        handler = CommandHandler(store, snapshot_interval=10)
+        aid = str(uuid.uuid4())
+
+        handler.handle_add(AddTodoCommand(aggregate_id=aid, title="テスト"))
+
+        # interval に達していないのでスナップショットは保存されない
+        assert store.save_snapshot.call_count == 0
+        # ロードは _load() の中で 1 回だけ
+        assert store.load_events.call_count == 1
+        assert store.load_snapshot.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# 修正 8: _deserialize でペイロードインジェクション対策
+# ---------------------------------------------------------------------------
+
+
+class TestDeserializeFiltersPayloadKeys:
+    """_deserialize が payload の未知キーと共通フィールドを安全に無視する。"""
+
+    def _insert_raw_event(
+        self, store: EventStore, aggregate_id: str, payload_str: str
+    ) -> None:
+        """テスト用に細工した payload を直接 SQLite に INSERT する。"""
+        with store._lock:
+            store._conn.execute(
+                "INSERT INTO events "
+                "(aggregate_id, event_type, version, payload, occurred_at, event_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    aggregate_id,
+                    "TodoAdded",
+                    1,
+                    payload_str,
+                    "2024-01-01T00:00:00",
+                    str(uuid.uuid4()),
+                ),
+            )
+            store._conn.commit()
+
+    def test_deserialize_filters_unknown_payload_keys(self) -> None:
+        """payload に未知キーが含まれていても正常にデシリアライズできる。
+
+        あるべき動作: payload に TodoAdded のフィールドに存在しない任意のキーが
+        含まれていてもエラーにならず、既知フィールドだけが使われる。
+        """
+        store = EventStore(":memory:")
+        aid = str(uuid.uuid4())
+        # unknown_key は TodoAdded に存在しないフィールド
+        payload = '{"title": "テスト", "category": "仕事", "priority": "高", "unknown_key": "malicious"}'
+        self._insert_raw_event(store, aid, payload)
+
+        events = store.load_events(aid)
+
+        assert len(events) == 1
+        event = events[0]
+        assert event.title == "テスト"
+        assert event.category == "仕事"
+        assert event.priority == "高"
+        # unknown_key は無視されること（TodoAdded には属性として存在しない）
+        assert not hasattr(event, "unknown_key")
+
+    def test_deserialize_ignores_payload_overrides_for_reserved_fields(self) -> None:
+        """payload に aggregate_id / version 等の共通フィールドが含まれていても上書きされない。
+
+        あるべき動作: payload 内の 'aggregate_id', 'version', 'occurred_at', 'event_id'
+        は無視され、DB カラムの値が使われる。攻撃者が payload を細工して
+        Aggregate ID を偽装しようとしても防げること。
+        """
+        store = EventStore(":memory:")
+        aid = str(uuid.uuid4())
+        injected_id = str(uuid.uuid4())  # 偽の aggregate_id
+        # 共通フィールドを payload に含めてインジェクションを試みる
+        payload = (
+            f'{{"title": "テスト", "category": "", "priority": "中", '
+            f'"aggregate_id": "{injected_id}", "version": 999}}'
+        )
+        self._insert_raw_event(store, aid, payload)
+
+        events = store.load_events(aid)
+
+        assert len(events) == 1
+        event = events[0]
+        # DB カラムの値が使われること（payload の偽値で上書きされないこと）
+        assert event.aggregate_id == aid, (
+            f"aggregate_id が payload の値 {injected_id!r} で上書きされました。"
+            "ペイロードインジェクション対策が機能していません。"
+        )
+        assert event.version == 1, (
+            f"version が payload の偽値 999 で上書きされました。"
+            "ペイロードインジェクション対策が機能していません。"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 修正 9: EventStore.__init__ でファイル DB 限定の WAL モード有効化
+# ---------------------------------------------------------------------------
+
+
+class TestEventStoreWALMode:
+    """ファイル DB では WAL モードが有効になり、:memory: では有効にならない。"""
+
+    def test_event_store_enables_wal_mode_for_file_db(self, tmp_path) -> None:
+        """ファイル DB で EventStore を初期化すると journal_mode が WAL になる。
+
+        あるべき動作: ファイルベースの SQLite DB では `PRAGMA journal_mode=WAL` が
+        実行され、並行読み書き性能と耐障害性が向上する。
+        """
+        db_file = str(tmp_path / "test.db")
+        store = EventStore(db_file)
+
+        try:
+            with store._lock:
+                row = store._conn.execute("PRAGMA journal_mode").fetchone()
+            journal_mode = row[0]
+        finally:
+            store.close()
+
+        assert journal_mode == "wal", (
+            f"ファイル DB の journal_mode は 'wal' であるべきですが '{journal_mode}' でした。"
+        )
+
+    def test_event_store_memory_db_does_not_enable_wal_mode(self) -> None:
+        """:memory: DB では WAL モードは有効にならない（適用不可のため）。
+
+        あるべき動作: :memory: は PRAGMA journal_mode=WAL が適用できないため
+        スキップされ、エラーも発生しない。journal_mode は 'memory' のまま。
+        """
+        store = EventStore(":memory:")
+
+        try:
+            with store._lock:
+                row = store._conn.execute("PRAGMA journal_mode").fetchone()
+            journal_mode = row[0]
+        finally:
+            store.close()
+
+        # :memory: の journal_mode は 'memory' であること
+        assert journal_mode == "memory", (
+            f":memory: の journal_mode は 'memory' であるべきですが '{journal_mode}' でした。"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 修正 10: lifespan で close() が呼ばれる
+# ---------------------------------------------------------------------------
+
+
+class TestLifespanClosesEventStore:
+    """lifespan コンテキスト終了時に _event_store.close() が呼ばれる。"""
+
+    def test_lifespan_closes_event_store_on_shutdown(self) -> None:
+        """TestClient の with ブロック終了（アプリシャットダウン）時に close() が呼ばれる。
+
+        あるべき動作: lifespan の finally 節で _event_store.close() が実行され、
+        DB 接続が確実に閉じられる。
+        """
+        from fastapi.testclient import TestClient
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        os.environ["TODO_DB_PATH"] = tmp.name
+
+        import src.main
+
+        importlib.reload(src.main)
+
+        close_called = []
+
+        original_close = src.main._event_store.close
+
+        def spy_close():
+            close_called.append(True)
+            original_close()
+
+        src.main._event_store.close = spy_close  # type: ignore[method-assign]
+
+        with TestClient(src.main.app):
+            pass  # アプリのシャットダウンは with ブロック終了時に走る
+
+        os.unlink(tmp.name)
+        os.environ.pop("TODO_DB_PATH", None)
+
+        assert len(close_called) == 1, (
+            "lifespan の shutdown 時に _event_store.close() が呼ばれていません。"
+            "lifespan の finally 節を確認してください。"
+        )
+
+    def test_lifespan_event_store_connection_closed_after_shutdown(self) -> None:
+        """アプリシャットダウン後に _event_store._conn は閉じられている。
+
+        あるべき動作: lifespan 終了後は DB 接続が閉じられており、
+        接続を使った操作は ProgrammingError を送出する。
+        """
+        from fastapi.testclient import TestClient
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        os.environ["TODO_DB_PATH"] = tmp.name
+
+        import src.main
+
+        importlib.reload(src.main)
+        event_store_ref = src.main._event_store
+
+        with TestClient(src.main.app):
+            pass  # シャットダウン実行
+
+        os.unlink(tmp.name)
+        os.environ.pop("TODO_DB_PATH", None)
+
+        # 接続が閉じられているため execute は ProgrammingError を送出するべき
+        with pytest.raises(sqlite3.ProgrammingError):
+            event_store_ref._conn.execute("SELECT 1")

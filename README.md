@@ -114,6 +114,18 @@ EventStore（SQLite）  ────→  イベントを再生して Read Model 
 - **Aggregate**: イベントを再生してビジネスルールを適用。
 - **Read Model**: 全イベントを再生して現在の状態を返す。スナップショット機能で高速化。
 
+## 設計上の堅牢化（コードレビュー反映）
+
+コードレビューで指摘された以下の修正が取り込まれています。
+
+- **未知イベントの例外化**: `TodoAggregate.apply()` は既知の 3 種以外のイベントを受け取ると `AggregateError` を送出する。`EventStore._deserialize()` は `EVENT_TYPES` に登録されていない `event_type` を読み込むと `UnknownEventTypeError` を送出する。どちらもリプレイ時のデータ破損を即座に検出するための仕組み。
+- **ペイロードインジェクション対策**: `EventStore._deserialize()` は payload をイベントクラスの固有フィールド集合でフィルタする。`aggregate_id` / `version` 等の共通フィールドは payload の値を無視し、DB カラムの値を使用する。
+- **WAL モード**: ファイルパスを指定して `EventStore` を初期化すると `PRAGMA journal_mode=WAL` が有効になり、並行読み書き性能と耐障害性が向上する（`:memory:` は対象外）。
+- **DB 接続の確実なクローズ**: FastAPI の `lifespan` コンテキストマネージャの `finally` 節で `_event_store.close()` を呼び出す。アプリシャットダウン時に接続が確実に解放される。
+- **スナップショット時の二重ロード排除**: `CommandHandler._maybe_snapshot()` は引数で受け取った `agg` と `event` から最新状態を組み立てるため、Event Store への追加ロードが発生しない。
+
+これらの堅牢化は `tests/test_review_fixes.py` の 11 件のテスト（`test_apply_unknown_event_raises_aggregate_error`、`test_maybe_snapshot_no_double_load_at_interval`、`test_deserialize_filters_unknown_payload_keys`、`test_event_store_enables_wal_mode_for_file_db`、`test_lifespan_closes_event_store_on_shutdown` ほか）によって仕様が保証されている。
+
 ## ディレクトリ構成
 
 ```

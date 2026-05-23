@@ -4,6 +4,7 @@
 行い、同時更新による履歴の壊れを防ぐ。スナップショット機能も提供する。
 """
 
+import dataclasses
 import json
 import sqlite3
 import threading
@@ -29,6 +30,8 @@ class EventStore:
 
     Args:
         db_path: SQLite データベースのパス。`":memory:"` でインメモリ。
+            ファイルパスを指定した場合は `PRAGMA journal_mode=WAL` が有効化され、
+            並行読み書き性能と耐障害性が向上する。`:memory:` の場合は WAL 非対応のためスキップ。
 
     Example:
         >>> store = EventStore(":memory:")
@@ -43,6 +46,11 @@ class EventStore:
         self._db_path = db_path
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._lock = threading.Lock()
+        # ファイル DB の場合のみ WAL モードを有効化。
+        # :memory: では適用できないためスキップする。
+        if db_path != ":memory:":
+            with self._lock:
+                self._conn.execute("PRAGMA journal_mode=WAL")
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -176,16 +184,27 @@ class EventStore:
     ) -> Event:
         """DB レコードをイベントオブジェクトに変換する。
 
+        payload はイベントクラスの固有フィールド集合でフィルタされる。
+        `aggregate_id` / `version` / `occurred_at` / `event_id` などの共通フィールドは
+        payload からではなく DB カラムの値を使用する（ペイロードインジェクション対策）。
+        payload に存在しない既知フィールドは dataclass デフォルト値で補完される。
+
         Raises:
             UnknownEventTypeError: event_type が EVENT_TYPES に登録されていない場合。
         """
         cls = EVENT_TYPES.get(event_type)
         if cls is None:
             raise UnknownEventTypeError(f"未知のイベントタイプ: {event_type!r}")
+        # payload の予期しないキーで共通フィールドを上書きされないよう
+        # 当該イベントクラスの固有フィールドだけに絞り込む（インジェクション対策）。
+        allowed_keys = {f.name for f in dataclasses.fields(cls)} - _PAYLOAD_RESERVED
+        filtered = {
+            k: v for k, v in json.loads(payload).items() if k in allowed_keys
+        }
         return cls(
             aggregate_id=aggregate_id,
             version=version,
             occurred_at=datetime.fromisoformat(occurred_at),
             event_id=event_id,
-            **json.loads(payload),
+            **filtered,
         )

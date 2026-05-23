@@ -57,7 +57,11 @@ class TodoAggregate:
         return agg
 
     def apply(self, event: Event) -> None:
-        """イベントを適用して状態を更新する。"""
+        """イベントを適用して状態を更新する。
+
+        Raises:
+            AggregateError: 未知のイベントタイプが渡された場合（リプレイ時の壊れ検出）。
+        """
         if isinstance(event, TodoAdded):
             self.title = event.title
             self.category = event.category
@@ -66,6 +70,10 @@ class TodoAggregate:
             self.completed = True
         elif isinstance(event, TodoDeleted):
             self.deleted = True
+        else:
+            raise AggregateError(
+                f"apply: 未知のイベントタイプ {type(event).__name__!r}"
+            )
         self.version = event.version
 
     def to_snapshot(self) -> dict[str, Any]:

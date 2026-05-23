@@ -58,7 +58,7 @@ class CommandHandler:
             priority=cmd.priority,
         )
         self._store.append(event)
-        self._maybe_snapshot(cmd.aggregate_id)
+        self._maybe_snapshot(cmd.aggregate_id, agg, event)
         return event
 
     def handle_complete(self, cmd: CompleteTodoCommand) -> Event:
@@ -80,7 +80,7 @@ class CommandHandler:
             version=agg.version + 1,
         )
         self._store.append(event)
-        self._maybe_snapshot(cmd.aggregate_id)
+        self._maybe_snapshot(cmd.aggregate_id, agg, event)
         return event
 
     def handle_delete(self, cmd: DeleteTodoCommand) -> Event:
@@ -100,7 +100,7 @@ class CommandHandler:
             version=agg.version + 1,
         )
         self._store.append(event)
-        self._maybe_snapshot(cmd.aggregate_id)
+        self._maybe_snapshot(cmd.aggregate_id, agg, event)
         return event
 
     def _load(self, aggregate_id: str) -> TodoAggregate:
@@ -115,8 +115,15 @@ class CommandHandler:
             aggregate_id, events, snapshot=state, snapshot_version=snap_version
         )
 
-    def _maybe_snapshot(self, aggregate_id: str) -> None:
-        """version が snapshot_interval の倍数に達していたらスナップショットを保存。"""
-        agg = self._load(aggregate_id)
-        if agg.version > 0 and agg.version % self._snapshot_interval == 0:
-            self._store.save_snapshot(aggregate_id, agg.to_snapshot(), agg.version)
+    def _maybe_snapshot(
+        self, aggregate_id: str, agg: TodoAggregate, event: Event
+    ) -> None:
+        """version が snapshot_interval の倍数に達していたらスナップショットを保存。
+
+        既に手元にある Aggregate と直近の Event から最新状態を組み立てるため、
+        Event Store からの再ロードは行わない（TOCTOU 回避とパフォーマンス改善）。
+        """
+        if event.version <= 0 or event.version % self._snapshot_interval != 0:
+            return
+        agg.apply(event)
+        self._store.save_snapshot(aggregate_id, agg.to_snapshot(), agg.version)

@@ -7,19 +7,13 @@ Todo API を提供する。Event Store はプロセス内で 1 インスタン�
 
 import os
 import uuid
+from contextlib import asynccontextmanager
+from dataclasses import asdict
 from enum import Enum
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from scalar_fastapi import get_scalar_api_reference
-
-
-class PriorityEnum(str, Enum):
-    """優先度クエリパラメータの許容値。"""
-
-    HIGH = "高"
-    MIDDLE = "中"
-    LOW = "低"
 
 from src.cqrs.aggregates import AggregateError
 from src.cqrs.command_handler import CommandHandler
@@ -31,7 +25,25 @@ from src.cqrs.commands import (
 from src.cqrs.event_store import EventStore
 from src.cqrs.projections import TodoReadModel
 
-app = FastAPI()
+
+class PriorityEnum(str, Enum):
+    """優先度クエリパラメータの許容値。"""
+
+    HIGH = "高"
+    MIDDLE = "中"
+    LOW = "低"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """アプリ終了時に Event Store の DB 接続を確実にクローズする。"""
+    try:
+        yield
+    finally:
+        _event_store.close()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/shipment")
@@ -135,7 +147,7 @@ def list_todos(
         items = _read_model.list_by_priority(priority.value)
     else:
         items = _read_model.list_all()
-    return [item.__dict__ for item in items]
+    return [asdict(item) for item in items]
 
 
 @app.get("/todos/{todo_id}")
@@ -144,7 +156,7 @@ def get_todo(todo_id: uuid.UUID):
     item = _read_model.get(str(todo_id))
     if item is None:
         raise HTTPException(status_code=404, detail="Not Found")
-    return item.__dict__
+    return asdict(item)
 
 
 @app.get("/todos/{todo_id}/events")
