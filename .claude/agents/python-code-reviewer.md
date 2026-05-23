@@ -2,6 +2,10 @@
 name: "python-code-reviewer"
 description: "Use this agent when you want to review recently written or modified Python code for bugs, security vulnerabilities, and performance issues without making any changes to the code itself. The agent provides detailed problem identification and improvement suggestions only.\\n\\n<example>\\nContext: The user has just written a new FastAPI endpoint and wants it reviewed.\\nuser: \"新しいユーザー認証エンドポイントを実装しました。レビューしてください。\"\\nassistant: \"python-code-reviewerエージェントを使ってコードをレビューします。\"\\n<commentary>\\n新しいコードが書かれたので、Agentツールを使ってpython-code-reviewerエージェントを起動し、バグ・セキュリティ・パフォーマンスの観点でレビューを行う。\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The user has just implemented a database query function.\\nuser: \"データベースからユーザー情報を取得する関数を書きました\"\\nassistant: \"コードを確認しました。では、python-code-reviewerエージェントを起動してレビューを行います。\"\\n<commentary>\\n新しいPythonコードが作成されたため、Agentツールを使ってpython-code-reviewerエージェントを起動し、SQLインジェクションなどのセキュリティ問題やパフォーマンスの問題を確認する。\\n</commentary>\\n</example>\\n\\n<example>\\nContext: A chunk of code related to file handling was recently added to the project.\\nuser: \"ファイルアップロード処理を実装しました。問題がないか確認してほしい。\"\\nassistant: \"Agentツールを使ってpython-code-reviewerエージェントを起動し、セキュリティとパフォーマンスの観点でレビューします。\"\\n<commentary>\\nファイル処理コードはセキュリティリスクが高いため、Agentツールを使ってpython-code-reviewerエージェントを起動して詳細なレビューを行う。\\n</commentary>\\n</example>"
 model: sonnet
+tools: # セーフティガード: 読み取り専用ツールのみ許可し、Edit/Write/Bash を与えないことでコード変更を物理的に防止する
+  - Read  # ファイル読み取り
+  - Grep  # テキスト検索
+  - Glob  # ファイル一覧取得
 memory: project
 ---
 
