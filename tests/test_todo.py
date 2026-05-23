@@ -1,5 +1,7 @@
 """TodoListクラスのテスト"""
 
+import dataclasses
+
 import pytest
 from src.todo import TodoList
 
@@ -132,3 +134,52 @@ def test_list_by_priority_no_match(todo_list: TodoList) -> None:
     todo_list.add("タスク", priority="高")
     result = todo_list.list_by_priority("低")
     assert result == []
+
+
+def test_add_empty_title_raises(todo_list: TodoList) -> None:
+    """空タイトルはValueErrorを送出すること"""
+    with pytest.raises(ValueError, match="空にできません"):
+        todo_list.add("")
+
+
+def test_add_whitespace_title_raises(todo_list: TodoList) -> None:
+    """空白のみのタイトルはValueErrorを送出すること"""
+    with pytest.raises(ValueError, match="空にできません"):
+        todo_list.add("   ")
+
+
+def test_add_invalid_priority_raises(todo_list: TodoList) -> None:
+    """不正な優先度はValueErrorを送出すること"""
+    with pytest.raises(ValueError, match="優先度は"):
+        todo_list.add("タスク", priority="極高")
+
+
+def test_list_by_priority_invalid_raises(todo_list: TodoList) -> None:
+    """不正な優先度でlist_by_priorityを呼ぶとValueErrorを送出すること"""
+    with pytest.raises(ValueError, match="優先度は"):
+        todo_list.list_by_priority("極高")
+
+
+def test_mark_completed_already_done_no_update(todo_list: TodoList) -> None:
+    """既に完了済みのアイテムはupdated_atが変更されないこと"""
+    todo_list.add("タスク")
+    first = todo_list.mark_completed(1)
+    assert first is not None
+    second = todo_list.mark_completed(1)
+    assert second is not None
+    assert second.updated_at == first.updated_at
+
+
+def test_todo_item_is_immutable(todo_list: TodoList) -> None:
+    """TodoItemはイミュータブルで直接変更できないこと"""
+    item = todo_list.add("タスク")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        item.completed = True  # type: ignore[misc]
+
+
+def test_list_all_items_are_immutable(todo_list: TodoList) -> None:
+    """list_allで取得したアイテムを直接変更できないこと"""
+    todo_list.add("タスク")
+    items = todo_list.list_all()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        items[0].completed = True  # type: ignore[misc]
