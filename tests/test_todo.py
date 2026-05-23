@@ -183,3 +183,95 @@ def test_list_all_items_are_immutable(todo_list: TodoList) -> None:
     items = todo_list.list_all()
     with pytest.raises(dataclasses.FrozenInstanceError):
         items[0].completed = True  # type: ignore[misc]
+
+
+# ===== 仕様確認テスト（コードレビュー指摘事項に基づくあるべき動作の検証） =====
+
+
+# ----- add: strip 動作 -----
+
+
+def test_add_title_with_surrounding_spaces_is_stripped(todo_list: TodoList) -> None:
+    """title の前後空白が strip されて保存されること"""
+    item = todo_list.add("  買い物  ")
+    assert item.title == "買い物"
+
+
+def test_add_category_with_surrounding_spaces_is_stripped(todo_list: TodoList) -> None:
+    """category の前後空白が strip されて保存されること"""
+    item = todo_list.add("タスク", category="  食料  ")
+    assert item.category == "食料"
+
+
+def test_add_title_and_category_both_stripped(todo_list: TodoList) -> None:
+    """title と category の両方が同時に strip されること"""
+    item = todo_list.add("  買い物  ", category="  食料  ")
+    assert item.title == "買い物"
+    assert item.category == "食料"
+
+
+@pytest.mark.parametrize("title,expected_error", [
+    ("", "タイトルは空にできません"),
+    ("   ", "タイトルは空にできません"),
+    ("\t\n", "タイトルは空にできません"),
+])
+def test_add_blank_title_raises_value_error(todo_list: TodoList, title: str, expected_error: str) -> None:
+    """空白・タブ・改行のみの title は ValueError になること"""
+    with pytest.raises(ValueError, match=expected_error):
+        todo_list.add(title)
+
+
+# ----- mark_completed: 各分岐の動作 -----
+
+
+def test_mark_completed_with_unknown_id_returns_none(todo_list: TodoList) -> None:
+    """存在しない ID を指定すると None を返すこと"""
+    result = todo_list.mark_completed(9999)
+    assert result is None
+
+
+def test_mark_completed_transitions_to_done(todo_list: TodoList) -> None:
+    """未完了アイテムを完了にすると completed=True かつ updated_at が更新されること"""
+    import time
+
+    item = todo_list.add("タスク")
+    original_updated_at = item.updated_at
+    # 時刻差を確実に生じさせる
+    time.sleep(0.01)
+    result = todo_list.mark_completed(item.id)
+    assert result is not None
+    assert result.completed is True
+    assert result.updated_at > original_updated_at
+
+
+def test_mark_completed_already_done_returns_same_item(todo_list: TodoList) -> None:
+    """既に完了済みのアイテムをもう一度完了にすると、同じ TodoItem がそのまま返ること"""
+    todo_list.add("タスク")
+    first_result = todo_list.mark_completed(1)
+    assert first_result is not None
+    second_result = todo_list.mark_completed(1)
+    assert second_result is not None
+    # updated_at が変化していないことで「そのまま返された」ことを確認
+    assert second_result.updated_at == first_result.updated_at
+    assert second_result.completed is True
+
+
+# ----- list_by_category / list_by_priority: 新規リストを返す -----
+
+
+def test_list_by_category_returns_new_list(todo_list: TodoList) -> None:
+    """list_by_category の戻り値を変更しても内部状態に影響しないこと"""
+    todo_list.add("仕事タスク", category="仕事")
+    result = todo_list.list_by_category("仕事")
+    result.clear()
+    # 内部状態は変化していないはず
+    assert len(todo_list.list_by_category("仕事")) == 1
+
+
+def test_list_by_priority_returns_new_list(todo_list: TodoList) -> None:
+    """list_by_priority の戻り値を変更しても内部状態に影響しないこと"""
+    todo_list.add("高優先タスク", priority="高")
+    result = todo_list.list_by_priority("高")
+    result.clear()
+    # 内部状態は変化していないはず
+    assert len(todo_list.list_by_priority("高")) == 1
