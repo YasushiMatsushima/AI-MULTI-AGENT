@@ -37,6 +37,39 @@ Claude Codeのマルチエージェント機能を学習する実習プロジェ
 - `.venv/` を直接編集しない
 - テストを削除して通過させない
 
+## エージェントログ出力（必須）
+Agent Teams のチームメイトおよびサブエージェントは、Dev Container 環境で tmux 分割表示が見えないため、ログをファイルに残すことで進捗を可視化する。**ログを残さなかった場合はタスク未完了とみなす。**
+
+### ログ出力ルール
+- ログディレクトリ: `/workspace/logs/`
+- ファイル名: `agent_<役割名>.log`（例: `agent_database.log`, `agent_framework.log`）
+- 役割名はリーダーから割り当てられた名前を使う（小文字スネークケース）
+
+### 起動直後（最優先で実行）
+作業を始める前に、必ず最初の Bash で以下を実行する：
+```bash
+mkdir -p /workspace/logs
+echo "[$(date -Iseconds)] START role=<役割名>" >> /workspace/logs/agent_<役割名>.log
+```
+
+### 主要ステップごと
+ファイル編集・コマンド実行・調査の節目ごとに追記する：
+```bash
+echo "[$(date -Iseconds)] <ステップの1行要約>" >> /workspace/logs/agent_<役割名>.log
+```
+
+### 完了時
+作業を完了する直前に必ず以下を実行する：
+```bash
+echo "[$(date -Iseconds)] DONE summary=<成果の1行要約>" >> /workspace/logs/agent_<役割名>.log
+```
+
+### リーダー側の検証義務
+リーダー（メイン Claude）はチームメイトの完了報告を受け取った際、以下を必ず確認する：
+1. `/workspace/logs/agent_<役割名>.log` が存在すること
+2. ログ末尾に `DONE` 行が含まれていること
+3. 不足があれば該当チームメイトを再起動してログ補完を要求する
+
 ## /goal テンプレート
 長時間タスクやマルチエージェント実行には以下の4ブロック構造を使う：
 
@@ -60,3 +93,11 @@ do not:
 progress tracking:
 完了したステップを progress.md に随時記録すること
 ```
+
+## API開発ルール
+- WebフレームワークはFastAPIを使用する
+- ORMはSQLModelを使用する
+- データベースはSQLite（開発環境）
+- APIテストにはhttpxのAsyncClientを使用する
+- サーバー起動コマンド: uv run uvicorn src.main:app --reload
+- テスト実行コマンド: uv run pytest -v

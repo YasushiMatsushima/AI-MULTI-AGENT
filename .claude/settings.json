@@ -10,11 +10,36 @@
       "Bash(docker compose *)",
       "Bash(find . *)",
       "Bash(ls *)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(mkdir -p /workspace/logs*)",
+      "Bash(tee -a /workspace/logs/*)"
     ],
     "defaultMode": "auto"
   },
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /workspace/.claude/hooks/log_tool_use.py"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p /workspace/logs && echo \"[$(date -Iseconds)] SUBAGENT_STOP\" >> /workspace/logs/all-agents.log"
+          }
+        ]
+      }
+    ]
   }
 }
